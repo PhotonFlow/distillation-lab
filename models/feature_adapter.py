@@ -1,13 +1,3 @@
-"""
-Implementation of the SDG method from:
-Unbiased Faster R-CNN for Single-source Domain Generalized Object Detection.
-
-This module provides:
-- Global-Local Transformation (GLT) for data augmentation.
-- Causal Attention Learning (CAL) with attention invariance loss.
-- Causal Prototype Learning (CPL) with explicit and implicit constraints.
-"""
-
 from __future__ import annotations
 
 import math
@@ -17,6 +7,13 @@ from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
+
+try:
+    from sam_mask_generator import SAMMaskGenerator
+    SAM_AVAILABLE = True
+except ImportError:
+    SAM_AVAILABLE = False
 
 
 def _sample_uniform(
@@ -188,7 +185,6 @@ def _boxes_to_masks(
 
 
 class GlobalLocalTransformation(nn.Module):
-    """Global-Local Transformation (GLT) module from the paper."""
 
     def __init__(
         self,
@@ -197,6 +193,9 @@ class GlobalLocalTransformation(nn.Module):
         alpha_range: Tuple[float, float] = (0.0, 1.0),
         clamp_range: Optional[Tuple[float, float]] = (0.0, 1.0),
         local_cfg: Optional[LocalAugmentConfig] = None,
+        use_sam: bool = False,
+        sam_checkpoint: str = "sam_vit_h_4b8939.pth",
+        sam_model_type: str = "vit_h"
     ) -> None:
         super().__init__()
         self.r_range = r_range
@@ -204,6 +203,17 @@ class GlobalLocalTransformation(nn.Module):
         self.alpha_range = alpha_range
         self.clamp_range = clamp_range
         self.local_cfg = local_cfg or LocalAugmentConfig()
+
+        self.use_sam = use_sam and SAM_AVAILABLE
+        self.sam_mask_generator = None
+        if self.use_sam:
+            print(f"Initializing SAM for GLT...")
+            self.sam_generator = SAMMaskGenerator(
+                checkpoint_path=sam_checkpoint, 
+                model_type=sam_model_type,
+                device='cuda' if torch.cuda.is_available() else 'cpu'
+                )
+            
 
     def global_transform(self, images: torch.Tensor) -> torch.Tensor:
         b, c, h, w = images.shape
@@ -238,11 +248,30 @@ class GlobalLocalTransformation(nn.Module):
         for i in range(b):
             img = images[i]
             img_masks: Optional[torch.Tensor] = None
+            
+            # Case A: Masks already provided
             if masks is not None and i < len(masks):
                 img_masks = masks[i].to(device=device, dtype=dtype)
+                
+            # Case B: Use SAM (External)
+            elif self.use_sam and self.sam_generator is not None and boxes is not None and i < len(boxes):
+                if len(boxes[i]) > 0:
+                    # Convert Tensor (C, H, W) -> Numpy (H, W, C) uint8
+                    img_np = (img.permute(1, 2, 0).detach().cpu().numpy() * 255).astype(np.uint8)
+                    
+                    # CALL YOUR CUSTOM FUNCTION: generate_mask (singular)
+                    sam_masks = self.sam_generator.generate_mask(img_np, boxes[i])
+                    
+                    # Convert back to tensor (float)
+                    img_masks = sam_masks.to(device=device, dtype=dtype)
+                else:
+                     img_masks = torch.zeros((0, h, w), device=device, dtype=dtype)
+
+            # Case C: Fallback to Box approximation
             elif boxes is not None and i < len(boxes):
                 img_masks = _boxes_to_masks(boxes[i], h, w, device, dtype)
 
+            # 2. Augmentation Logic (Applied to Objects vs Background)
             if img_masks is None or img_masks.numel() == 0:
                 aug = _apply_random_local_augment(img, self.local_cfg)
                 out.append(aug.unsqueeze(0))
@@ -256,6 +285,7 @@ class GlobalLocalTransformation(nn.Module):
             bg_aug = _apply_random_local_augment(bg, self.local_cfg) * bg_mask
 
             obj_accum = torch.zeros_like(img)
+            # Sum augmentations for each object
             for mask in obj_masks:
                 mask_c = mask.expand(c, h, w)
                 obj = img * mask_c
