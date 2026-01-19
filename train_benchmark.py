@@ -8,45 +8,45 @@ from torchvision.datasets import CocoDetection
 import pandas as pd
 import numpy as np
 import os
-from tqdm import tqdm
-import time
-from torchmetrics.detection.mean_ap import MeanAveragePrecision
 import torch.nn.functional as F
+from tqdm import tqdm
+from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
-# --- Import Your Modules ---
-from models.SDG_FRCNN import SDG_FRCNN
-from models.feature_adapter import sdg_total_loss
+# --- Import Your Custom Modules ---
+from models.SDG_FRCNN import SDGFasterRCNN
 
 # --- Configuration ---
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 NUM_CLASSES = 81  # 80 COCO classes + 1 Background
 BATCH_SIZE = 4
-NUM_EPOCHS = 2
-LR = 0.005
-FIXED_SIZE=(640,640)
+NUM_EPOCHS = 5
+LR = 0.002
+FIXED_SIZE = (640, 640)  # REQUIRED: Force fixed size so GLT module can stack images
 
-
-# Paths (From your previous data setup)
+# Paths
 TRAIN_IMG = "./datasets/custom_benchmark/train/images"
 TRAIN_ANN = "./datasets/custom_benchmark/train/annotations/train.json"
 VAL_IMG = "./datasets/custom_benchmark/val_ood/images"
 VAL_ANN = "./datasets/custom_benchmark/val_ood/annotations/val.json"
 
-# --- 1. Data Loading ---
+# --- 1. Data Loading Utils ---
 
-def get_transforms(train=True):
-    # Simple ToTensor. You can add more data aug for Baseline A if you want.
-    # GLT handles aug for SDG internally.
+def get_transforms():
     return torchvision.transforms.Compose([
         torchvision.transforms.ToTensor()
     ])
 
+def collate_fn(batch):
+    batch=[b for b in batch if b is not None]
+    if len(batch)==0:
+        return None
+    return tuple(zip(*batch))
 class COCOWrapper(Dataset):
-    """Wrapper to ensure dataset returns (img, target) compatible with R-CNN"""
     def __init__(self, root, ann, transforms=None):
         self.coco = CocoDetection(root, ann)
         self.transforms = transforms
-        # Map non-contiguous COCO category ids (e.g., max id 90) to [1..N]
+        
+        # Create map from COCO cat_ids to contiguous [1...80]
         cat_ids = sorted(self.coco.coco.getCatIds())
         self.cat_id_to_contiguous_id = {cat_id: idx + 1 for idx, cat_id in enumerate(cat_ids)}
 
@@ -55,109 +55,88 @@ class COCOWrapper(Dataset):
 
     def __getitem__(self, idx):
         img, target = self.coco[idx]
-        
-        # Transform image
         if self.transforms:
-            img = self.transforms(img)
+            img = self.transforms(img) # Returns (C, H, W) Tensor
 
-
+        # 1. Resize Image to Fixed Size
         original_h, original_w = img.shape[-2:]
-        img=F.interpolate(img.unsqueeze(0), size=FIXED_SIZE, mode='bilinear', align_corners=False).squeeze(0)
+        img = F.interpolate(img.unsqueeze(0), size=FIXED_SIZE, mode='bilinear', align_corners=False).squeeze(0)
+        
+        # Calculate scale factors
         scale_x = FIXED_SIZE[1] / original_w
         scale_y = FIXED_SIZE[0] / original_h
 
-
-        # Reformat Target for Faster R-CNN
         boxes = []
         labels = []
         
         for obj in target:
-            bbox = obj['bbox'] # [x, y, w, h]
-            # Convert to [x1, y1, x2, y2]
-            x1, y1, w, h = bbox
-            x2 = x1 + w
-            y2 = y1 + h
-
-            x1*=scale_x
-            y1*=scale_y
-            x2*=scale_x
-            y2*=scale_y
+            x, y, w, h = obj['bbox']
             
-            # Filter tiny/invalid boxes
-            if w > 1 and h > 1:
-                boxes.append([x1, y1, x2, y2])
+            # Convert to [x1, y1, x2, y2] and Scale
+            x1 = x * scale_x
+            y1 = y * scale_y
+            x2 = (x + w) * scale_x
+            y2 = (y + h) * scale_y
+            
+            # 2. Logic Fix: Check EVERYTHING before appending ANYTHING
+            # Ensure box is valid size AND category is known
+            if (x2 - x1) > 1 and (y2 - y1) > 1:
                 cat_id = obj['category_id']
-                if cat_id not in self.cat_id_to_contiguous_id:
-                    raise ValueError(f"Unknown category_id {cat_id} in annotations.")
-                labels.append(self.cat_id_to_contiguous_id[cat_id])
+                if cat_id in self.cat_id_to_contiguous_id:
+                    # Append BOTH together to ensure sync
+                    boxes.append([x1, y1, x2, y2])
+                    labels.append(self.cat_id_to_contiguous_id[cat_id])
+
+        # 3. Filter empty images
+        if len(boxes) == 0:
+            return None
 
         target_dict = {}
         target_dict["image_id"] = torch.tensor([idx])
+        target_dict['boxes'] = torch.as_tensor(boxes, dtype=torch.float32)
+        target_dict['labels'] = torch.as_tensor(labels, dtype=torch.int64)
         
-        if len(boxes) > 0:
-            target_dict['boxes'] = torch.as_tensor(boxes, dtype=torch.float32)
-            target_dict['labels'] = torch.as_tensor(labels, dtype=torch.int64)
-            target_dict["area"] = torch.tensor([obj['area'] for obj in target]) 
-            target_dict["iscrowd"] = torch.zeros((len(labels),), dtype=torch.int64)
-        else:
-            # Handle images with no objects
-            target_dict['boxes'] = torch.zeros((0, 4), dtype=torch.float32)
-            target_dict['labels'] = torch.zeros((0,), dtype=torch.int64)
-            target_dict["area"] = torch.tensor([obj['area'] for obj in target]) 
-            target_dict["iscrowd"] = torch.zeros((len(labels),), dtype=torch.int64)
-            
+        # Approximate area for COCO eval compatibility
+        target_dict["area"] = (target_dict['boxes'][:, 2] - target_dict['boxes'][:, 0]) * \
+                              (target_dict['boxes'][:, 3] - target_dict['boxes'][:, 1])
+        target_dict["iscrowd"] = torch.zeros((len(labels),), dtype=torch.int64)
+
         return img, target_dict
 
-def collate_fn(batch):
-    return tuple(zip(*batch))
-
-# --- 2. Evaluation Helper ---
+# --- 2. Evaluation Engine ---
 
 @torch.no_grad()
-def evaluate(model, data_loader):
+def evaluate_map(model, loader):
     model.eval()
     metric = MeanAveragePrecision()
     
-    print("Evaluating...")
-    for images, targets in tqdm(data_loader, desc="Eval"):
+    for images, targets in tqdm(loader, desc="  Evaluating", leave=False):
         images = list(img.to(DEVICE) for img in images)
-        
-        # Targets need to be on device for Metric? usually not required but safer
-        # Metric expects:
-        # preds: list of dicts {boxes, scores, labels}
-        # target: list of dicts {boxes, labels}
         
         preds = model(images)
         
-        # Prepare for torchmetrics
-        formatted_preds = []
-        for p in preds:
-            formatted_preds.append({
-                "boxes": p["boxes"].cpu(),
-                "scores": p["scores"].cpu(),
-                "labels": p["labels"].cpu()
-            })
-            
-        formatted_targets = []
-        for t in targets:
-            formatted_targets.append({
-                "boxes": t["boxes"].cpu(),
-                "labels": t["labels"].cpu()
-            })
-            
-        metric.update(formatted_preds, formatted_targets)
+        # Format for torchmetrics
+        preds_formatted = [
+            dict(boxes=p['boxes'].cpu(), scores=p['scores'].cpu(), labels=p['labels'].cpu())
+            for p in preds
+        ]
+        
+        targets_formatted = [
+            dict(boxes=t['boxes'].cpu(), labels=t['labels'].cpu())
+            for t in targets
+        ]
+        
+        metric.update(preds_formatted, targets_formatted)
         
     result = metric.compute()
-    # Extract scalar map_50
-    map_50 = result['map_50'].item()
-    return map_50
+    return result['map_50'].item()
 
-# --- 3. Training Loops ---
+# --- 3. Training Functions ---
 
-def train_baseline(model, optimizer, loader):
+def train_epoch_baseline(model, optimizer, loader):
     model.train()
     total_loss = 0
-    for images, targets in tqdm(loader, desc="Train Baseline"):
+    for images, targets in tqdm(loader, desc="  Train Baseline", leave=False):
         images = list(image.to(DEVICE) for image in images)
         targets = [{k: v.to(DEVICE) for k, v in t.items()} for t in targets]
 
@@ -168,31 +147,38 @@ def train_baseline(model, optimizer, loader):
         losses.backward()
         optimizer.step()
         total_loss += losses.item()
-        
     return total_loss / len(loader)
 
-def train_sdg(model, optimizer, loader):
+def train_epoch_sdg(model, optimizer, loader):
     model.train()
     total_loss = 0
-    for images, targets in tqdm(loader, desc="Train SDG"):
+    prot_loss_sum = 0
+    att_loss_sum = 0
+    
+    for images, targets in tqdm(loader, desc="  Train SDG", leave=False):
         images = list(image.to(DEVICE) for image in images)
         targets = [{k: v.to(DEVICE) for k, v in t.items()} for t in targets]
 
-        # The SDG model returns a dict with 'total_loss', 'sup_loss', etc.
-        out_dict = model(images, targets)
-        loss = out_dict['total_loss']
+        # SDGFasterRCNN returns a dict with component losses
+        out = model(images, targets)
+        loss = out['total_loss']
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        total_loss += loss.item()
         
-    return total_loss / len(loader)
+        total_loss += loss.item()
+        prot_loss_sum += out['prot_loss'].item()
+        att_loss_sum += out['att_loss'].item()
+        
+    avg_loss = total_loss / len(loader)
+    print(f"    [Details] Total: {avg_loss:.3f} | Prot: {prot_loss_sum/len(loader):.3f} | Att: {att_loss_sum/len(loader):.3f}")
+    return avg_loss
 
-# --- 4. Main Experiment Runner ---
+# --- 4. Main Runner ---
 
 def run_benchmark():
-    # Setup Data
+    print(f"Loading data from {TRAIN_IMG}...")
     train_set = COCOWrapper(TRAIN_IMG, TRAIN_ANN, get_transforms())
     val_set = COCOWrapper(VAL_IMG, VAL_ANN, get_transforms())
     
@@ -201,12 +187,12 @@ def run_benchmark():
     
     results = []
 
-    # ==========================================
-    # Experiment A: Baseline (Standard R-CNN)
-    # ==========================================
-    print("\n" + "="*30)
-    print("Running Baseline A: Standard Faster R-CNN")
-    print("="*30)
+    # ==========================
+    # 1. BASELINE A: Standard R-CNN
+    # ==========================
+    print("\n" + "="*40)
+    print("STARTING BASELINE A: Standard Faster R-CNN")
+    print("="*40)
     
     model_a = fasterrcnn_resnet50_fpn(pretrained=True)
     in_features = model_a.roi_heads.box_predictor.cls_score.in_features
@@ -216,47 +202,37 @@ def run_benchmark():
     opt_a = optim.SGD(model_a.parameters(), lr=LR, momentum=0.9, weight_decay=0.0005)
 
     # for epoch in range(NUM_EPOCHS):
-    #     loss = train_baseline(model_a, opt_a, train_loader)
-    #     map_50 = evaluate(model_a, val_loader)
-        
-    #     print(f"Epoch {epoch+1}: Loss={loss:.4f}, mAP@50={map_50:.4f}")
-    #     results.append({
-    #         "Model": "Baseline_A",
-    #         "Epoch": epoch + 1,
-    #         "Train_Loss": loss,
-    #         "Val_mAP_50": map_50
-    #     })
+    #     loss = train_epoch_baseline(model_a, opt_a, train_loader)
+    #     mAP = evaluate_map(model_a, val_loader)
+    #     print(f"Epoch {epoch+1}/{NUM_EPOCHS} | Loss: {loss:.4f} | Val mAP@50: {mAP:.4f}")
+    #     results.append({"Model": "Baseline_A", "Epoch": epoch+1, "Loss": loss, "mAP_50": mAP})
 
-    # ==========================================
-    # Experiment B: SDG Method (Your Implementation)
-    # ==========================================
-    print("\n" + "="*30)
-    print("Running Method: SDG Faster R-CNN (Ours)")
-    print("="*30)
+    # ==========================
+    # 2. METHOD: SDG R-CNN (Ours)
+    # ==========================
+    print("\n" + "="*40)
+    print("STARTING METHOD: SDG Faster R-CNN (With SAM)")
+    print("="*40)
     
-    # Initialize with SAM enabled
-    model_sdg = SDG_FRCNN(NUM_CLASSES, use_sam=True, sam_checkpoint="sam_vit_h_4b8939.pth")
+    model_sdg = SDGFasterRCNN(
+        num_classes=NUM_CLASSES, 
+        use_sam=True, 
+        sam_checkpoint="sam_vit_h_4b8939.pth"
+    )
     model_sdg.to(DEVICE)
     
-    # Note: SDG usually requires lower LR or careful tuning
     opt_sdg = optim.SGD(model_sdg.parameters(), lr=LR, momentum=0.9, weight_decay=0.0005)
 
     for epoch in range(NUM_EPOCHS):
-        loss = train_sdg(model_sdg, opt_sdg, train_loader)
-        map_50 = evaluate(model_sdg, val_loader)
-        
-        print(f"Epoch {epoch+1}: Loss={loss:.4f}, mAP@50={map_50:.4f}")
-        results.append({
-            "Model": "SDG_RCNN",
-            "Epoch": epoch + 1,
-            "Train_Loss": loss,
-            "Val_mAP_50": map_50
-        })
+        loss = train_epoch_sdg(model_sdg, opt_sdg, train_loader)
+        mAP = evaluate_map(model_sdg, val_loader)
+        print(f"Epoch {epoch+1}/{NUM_EPOCHS} | Loss: {loss:.4f} | Val mAP@50: {mAP:.4f}")
+        results.append({"Model": "SDG_RCNN", "Epoch": epoch+1, "Loss": loss, "mAP_50": mAP})
 
-    # Save Results
+    # Save
     df = pd.DataFrame(results)
-    df.to_csv("benchmark_results_final.csv", index=False)
-    print("\nBenchmark Complete. Saved to benchmark_results_final.csv")
+    df.to_csv("benchmark_final_results.csv", index=False)
+    print("\nBenchmark Finished! Results saved to 'benchmark_final_results.csv'")
 
 if __name__ == "__main__":
     run_benchmark()
