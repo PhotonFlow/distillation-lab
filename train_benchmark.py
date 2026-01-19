@@ -11,6 +11,7 @@ import os
 from tqdm import tqdm
 import time
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
+import torch.nn.functional as F
 
 # --- Import Your Modules ---
 from models.SDG_FRCNN import SDG_FRCNN
@@ -20,8 +21,10 @@ from models.feature_adapter import sdg_total_loss
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 NUM_CLASSES = 81  # 80 COCO classes + 1 Background
 BATCH_SIZE = 4
-NUM_EPOCHS = 5
+NUM_EPOCHS = 2
 LR = 0.005
+FIXED_SIZE=(640,640)
+
 
 # Paths (From your previous data setup)
 TRAIN_IMG = "./datasets/custom_benchmark/train/images"
@@ -57,6 +60,13 @@ class COCOWrapper(Dataset):
         if self.transforms:
             img = self.transforms(img)
 
+
+        original_h, original_w = img.shape[-2:]
+        img=F.interpolate(img.unsqueeze(0), size=FIXED_SIZE, mode='bilinear', align_corners=False).squeeze(0)
+        scale_x = FIXED_SIZE[1] / original_w
+        scale_y = FIXED_SIZE[0] / original_h
+
+
         # Reformat Target for Faster R-CNN
         boxes = []
         labels = []
@@ -67,6 +77,11 @@ class COCOWrapper(Dataset):
             x1, y1, w, h = bbox
             x2 = x1 + w
             y2 = y1 + h
+
+            x1*=scale_x
+            y1*=scale_y
+            x2*=scale_x
+            y2*=scale_y
             
             # Filter tiny/invalid boxes
             if w > 1 and h > 1:
@@ -82,10 +97,14 @@ class COCOWrapper(Dataset):
         if len(boxes) > 0:
             target_dict['boxes'] = torch.as_tensor(boxes, dtype=torch.float32)
             target_dict['labels'] = torch.as_tensor(labels, dtype=torch.int64)
+            target_dict["area"] = torch.tensor([obj['area'] for obj in target]) 
+            target_dict["iscrowd"] = torch.zeros((len(labels),), dtype=torch.int64)
         else:
             # Handle images with no objects
             target_dict['boxes'] = torch.zeros((0, 4), dtype=torch.float32)
             target_dict['labels'] = torch.zeros((0,), dtype=torch.int64)
+            target_dict["area"] = torch.tensor([obj['area'] for obj in target]) 
+            target_dict["iscrowd"] = torch.zeros((len(labels),), dtype=torch.int64)
             
         return img, target_dict
 
@@ -196,17 +215,17 @@ def run_benchmark():
     
     opt_a = optim.SGD(model_a.parameters(), lr=LR, momentum=0.9, weight_decay=0.0005)
 
-    for epoch in range(NUM_EPOCHS):
-        loss = train_baseline(model_a, opt_a, train_loader)
-        map_50 = evaluate(model_a, val_loader)
+    # for epoch in range(NUM_EPOCHS):
+    #     loss = train_baseline(model_a, opt_a, train_loader)
+    #     map_50 = evaluate(model_a, val_loader)
         
-        print(f"Epoch {epoch+1}: Loss={loss:.4f}, mAP@50={map_50:.4f}")
-        results.append({
-            "Model": "Baseline_A",
-            "Epoch": epoch + 1,
-            "Train_Loss": loss,
-            "Val_mAP_50": map_50
-        })
+    #     print(f"Epoch {epoch+1}: Loss={loss:.4f}, mAP@50={map_50:.4f}")
+    #     results.append({
+    #         "Model": "Baseline_A",
+    #         "Epoch": epoch + 1,
+    #         "Train_Loss": loss,
+    #         "Val_mAP_50": map_50
+    #     })
 
     # ==========================================
     # Experiment B: SDG Method (Your Implementation)
