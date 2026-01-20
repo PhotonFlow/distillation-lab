@@ -364,10 +364,21 @@ def _compute_prototypes(
     labels: torch.Tensor,
     num_classes: int,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Compute class prototypes by averaging ROI features per class."""
+    """Compute class prototypes by averaging ROI features per class.
+
+    Background (label 0) is excluded from prototype computation.
+    """
     device = features.device
     dtype = features.dtype
     feat_dim = features.shape[-1]
+    valid = (labels > 0) & (labels < num_classes)
+    if not valid.any().item():
+        protos = torch.zeros((num_classes, feat_dim), device=device, dtype=dtype)
+        present = torch.zeros((num_classes,), device=device, dtype=torch.bool)
+        return protos, present
+
+    features = features[valid]
+    labels = labels[valid]
     protos = torch.zeros((num_classes, feat_dim), device=device, dtype=dtype)
     counts = torch.zeros((num_classes,), device=device, dtype=dtype)
     protos.index_add_(0, labels, features)

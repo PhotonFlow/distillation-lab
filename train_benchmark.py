@@ -20,7 +20,7 @@ DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cp
 NUM_CLASSES = 81 
 BATCH_SIZE = 4
 NUM_EPOCHS = 40
-LR = 0.002
+LR = 0.001
 FIXED_SIZE = (640, 640) 
 CHECKPOINT_DIR="./checkpoints"
 os.makedirs(CHECKPOINT_DIR,exist_ok=True)
@@ -209,24 +209,24 @@ def run_benchmark():
 
     best_map_baseline=0.0
 
-    for epoch in range(NUM_EPOCHS):
-        loss = train_epoch_baseline(model_a, opt_a, train_loader)
-        metrics= evaluate_map(model_a,val_loader)
-        current_map_baseline=metrics["mAP_50"]
-        torch.save(model_a.state_dict(),os.path.join(CHECKPOINT_DIR,'baseline_frcnn_last.pth'))
-        if current_map_baseline >best_map_baseline:
-            best_map_baseline=current_map_baseline
-            torch.save(model_a.state_dict(),os.path.join(CHECKPOINT_DIR,'baseline_frcnn_best.pth'))
-        scheduler_a.step()
-        print(f"Epoch {epoch+1}/{NUM_EPOCHS} | Loss: {loss:.4f} | Val mAP@50: {metrics['mAP_50']}")
-        results.append({"Model": "Baseline_A", 
-                        "Epoch": epoch+1,
-                         "Loss": loss,
-                         "mAP_50": metrics['mAP_50'],
-                         "mAP_50_95":metrics['mAP_50_95'],
-                         "Recall":metrics['recall']
-        })
-        pd.DataFrame(results).to_csv("benchmark_final_results.csv",index=False)
+    # for epoch in range(NUM_EPOCHS):
+    #     loss = train_epoch_baseline(model_a, opt_a, train_loader)
+    #     metrics= evaluate_map(model_a,val_loader)
+    #     current_map_baseline=metrics["mAP_50"]
+    #     torch.save(model_a.state_dict(),os.path.join(CHECKPOINT_DIR,'baseline_frcnn_last.pth'))
+    #     if current_map_baseline >best_map_baseline:
+    #         best_map_baseline=current_map_baseline
+    #         torch.save(model_a.state_dict(),os.path.join(CHECKPOINT_DIR,'baseline_frcnn_best.pth'))
+    #     scheduler_a.step()
+    #     print(f"Epoch {epoch+1}/{NUM_EPOCHS} | Loss: {loss:.4f} | Val mAP@50: {metrics['mAP_50']}")
+    #     results.append({"Model": "Baseline_A", 
+    #                     "Epoch": epoch+1,
+    #                      "Loss": loss,
+    #                      "mAP_50": metrics['mAP_50'],
+    #                      "mAP_50_95":metrics['mAP_50_95'],
+    #                      "Recall":metrics['recall']
+    #     })
+    #     pd.DataFrame(results).to_csv("benchmark_final_results.csv",index=False)
 
     # ==========================
     # 2. METHOD: SDG R-CNN (Ours)
@@ -238,7 +238,10 @@ def run_benchmark():
     model_sdg = SDGFasterRCNN(
         num_classes=NUM_CLASSES, 
         use_sam=True, 
-        sam_checkpoint="sam_vit_h_4b8939.pth"
+        sam_checkpoint="sam_vit_h_4b8939.pth",
+        use_attention_rpn=True,
+        rpn_binarize=True,
+        explicit_rpn_thresh=0.7
     )
     model_sdg.to(DEVICE)
     
