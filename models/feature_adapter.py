@@ -327,8 +327,8 @@ class CausalAttentionLearning(nn.Module):
 
     @staticmethod
     def attention_map(features: torch.Tensor) -> torch.Tensor:
-        # Eq. (8): F_att = sigmoid(E(x)). Use channel-mean as a lightweight proxy.
-        return torch.sigmoid(features.mean(dim=1, keepdim=True))
+        # Eq. (8): F_att = sigmoid(E(x)).
+        return torch.sigmoid(features)
 
     def binarize(self, att: torch.Tensor) -> torch.Tensor:
         if self.binarize_threshold is None:

@@ -220,8 +220,10 @@ class SDGFasterRCNN(nn.Module):
         use_sam=False,
         sam_checkpoint=None,
         use_attention_rpn: bool = True,
-        rpn_binarize: bool = True,
+        rpn_binarize: bool = False,
         explicit_rpn_thresh: float = 0.7,
+        lambda_att: float = 0.1,
+        lambda_prot: float = 0.1,
     ):
         super().__init__()
         
@@ -275,6 +277,8 @@ class SDGFasterRCNN(nn.Module):
                 score_target=self.base_model.roi_heads,
             )
         self.explicit_rpn_thresh = explicit_rpn_thresh
+        self.lambda_att = lambda_att
+        self.lambda_prot = lambda_prot
     
     def _forward_base(self, images, targets):
         original_image_sizes = []
@@ -383,7 +387,7 @@ class SDGFasterRCNN(nn.Module):
                 src_pass["features"], proposals_exp, src_pass["images"].image_sizes
             )
             logits_aug_exp = self._roi_logits(
-                aug_pass["features"], proposals_exp, src_pass["images"].image_sizes
+                aug_pass["features"], proposals_exp, aug_pass["images"].image_sizes
             )
             if logits_src_exp is None or logits_aug_exp is None:
                 l_prot_exp = torch.tensor(0.0, device=logits_src.device, dtype=logits_src.dtype)
@@ -400,7 +404,13 @@ class SDGFasterRCNN(nn.Module):
             l_prot_final = l_prot_exp + l_prot_imp
             
             sup_loss = sum(loss for loss in src_pass["losses"].values())
-            total_loss = sdg_total_loss(sup_loss, l_att, l_prot_final)
+            total_loss = sdg_total_loss(
+                sup_loss,
+                l_att,
+                l_prot_final,
+                lambda_att=self.lambda_att,
+                lambda_prot=self.lambda_prot,
+            )
             
             return {
                 "total_loss": total_loss,

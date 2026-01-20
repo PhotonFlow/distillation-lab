@@ -34,4 +34,3 @@ if __name__ == "__main__":
     os.makedirs(DATASET_ROOT, exist_ok=True)
     setup_coco()
 
-    

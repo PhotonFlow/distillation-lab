@@ -24,6 +24,11 @@ LR = 0.001
 FIXED_SIZE = (640, 640) 
 CHECKPOINT_DIR="./checkpoints"
 os.makedirs(CHECKPOINT_DIR,exist_ok=True)
+WARMUP_EPOCHS = 15
+LAMBDA_ATT_START = 0.0
+LAMBDA_ATT_END = 0.1
+LAMBDA_PROT_START = 0.0
+LAMBDA_PROT_END = 0.1
 
 
 # Paths
@@ -44,6 +49,13 @@ def collate_fn(batch):
     if len(batch)==0:
         return None
     return tuple(zip(*batch))
+
+def linear_warmup(epoch, warmup_epochs, start, end):
+    if warmup_epochs <= 0:
+        return end
+    if epoch >= warmup_epochs:
+        return end
+    return start + (end - start) * float(epoch + 1) / float(warmup_epochs)
 class COCOWrapper(Dataset):
     def __init__(self, root, ann, transforms=None):
         self.coco = CocoDetection(root, ann)
@@ -240,7 +252,7 @@ def run_benchmark():
         use_sam=True, 
         sam_checkpoint="sam_vit_h_4b8939.pth",
         use_attention_rpn=True,
-        rpn_binarize=True,
+        rpn_binarize=False,
         explicit_rpn_thresh=0.7
     )
     model_sdg.to(DEVICE)
@@ -251,6 +263,8 @@ def run_benchmark():
     best_map_unbiased=0.0
 
     for epoch in range(NUM_EPOCHS):
+        model_sdg.lambda_att = linear_warmup(epoch, WARMUP_EPOCHS, LAMBDA_ATT_START, LAMBDA_ATT_END)
+        model_sdg.lambda_prot = linear_warmup(epoch, WARMUP_EPOCHS, LAMBDA_PROT_START, LAMBDA_PROT_END)
         loss = train_epoch_sdg(model_sdg, opt_sdg, train_loader)
         metrics=evaluate_map(model_sdg,val_loader)
         current_map_unbiased=metrics["mAP_50"]
