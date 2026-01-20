@@ -157,14 +157,14 @@ class SDGFasterRCNN(nn.Module):
 
             t_boxes = [t['boxes'] for t in targets] if targets else None
             images_aug_tensor = self.glt(imgs_stack, boxes=t_boxes)
-            if np.random.rand() < 0.01: # Save 1% of images to avoid spamming
-                import torchvision.utils as vutils
-                debug_grid = vutils.make_grid(
-                    torch.cat([imgs_stack[0:1], images_aug_tensor[0:1]], dim=0), 
-                    nrow=2, padding=5, normalize=False
-                )
-                vutils.save_image(debug_grid, f"debug_aug_{np.random.randint(1000)}.jpg")
-                print("Saved debug_aug.jpg")
+            # if np.random.rand() < 0.01: # Save 1% of images to avoid spamming
+            #     import torchvision.utils as vutils
+            #     debug_grid = vutils.make_grid(
+            #         torch.cat([imgs_stack[0:1], images_aug_tensor[0:1]], dim=0), 
+            #         nrow=2, padding=5, normalize=False
+            #     )
+            #     vutils.save_image(debug_grid, f"debug_aug_{np.random.randint(1000)}.jpg")
+            #     print("Saved debug_aug.jpg")
             images_aug_list = [img for img in images_aug_tensor]
 
             # 2. Pass 1: Source

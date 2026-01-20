@@ -17,11 +17,14 @@ from models.SDG_FRCNN import SDGFasterRCNN
 
 # --- Configuration ---
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-NUM_CLASSES = 81  # 80 COCO classes + 1 Background
+NUM_CLASSES = 81 
 BATCH_SIZE = 4
-NUM_EPOCHS = 5
+NUM_EPOCHS = 40
 LR = 0.002
-FIXED_SIZE = (640, 640)  # REQUIRED: Force fixed size so GLT module can stack images
+FIXED_SIZE = (640, 640) 
+CHECKPOINT_DIR="./checkpoints"
+os.makedirs(CHECKPOINT_DIR,exist_ok=True)
+
 
 # Paths
 TRAIN_IMG = "./datasets/custom_benchmark/train/images"
@@ -129,7 +132,9 @@ def evaluate_map(model, loader):
         metric.update(preds_formatted, targets_formatted)
         
     result = metric.compute()
-    return result['map_50'].item()
+    return {"mAP_50":result['map_50'].item(),
+            "mAP_50_95":result['map'].item(),
+            "recall":result['mar_100'].item()}
 
 # --- 3. Training Functions ---
 
@@ -200,12 +205,28 @@ def run_benchmark():
     model_a.to(DEVICE)
     
     opt_a = optim.SGD(model_a.parameters(), lr=LR, momentum=0.9, weight_decay=0.0005)
+    scheduler_a=torch.optim.lr_scheduler.MultiStepLR(opt_a, milestones=[3,4],gamma=0.1)
 
-    # for epoch in range(NUM_EPOCHS):
-    #     loss = train_epoch_baseline(model_a, opt_a, train_loader)
-    #     mAP = evaluate_map(model_a, val_loader)
-    #     print(f"Epoch {epoch+1}/{NUM_EPOCHS} | Loss: {loss:.4f} | Val mAP@50: {mAP:.4f}")
-    #     results.append({"Model": "Baseline_A", "Epoch": epoch+1, "Loss": loss, "mAP_50": mAP})
+    best_map_baseline=0.0
+
+    for epoch in range(NUM_EPOCHS):
+        loss = train_epoch_baseline(model_a, opt_a, train_loader)
+        metrics= evaluate_map(model_a,val_loader)
+        current_map_baseline=metrics["mAP_50"]
+        torch.save(model_a.state_dict(),os.path.join(CHECKPOINT_DIR,'baseline_frcnn_last.pth'))
+        if current_map_baseline >best_map_baseline:
+            best_map_baseline=current_map_baseline
+            torch.save(model_a.state_dict(),os.path.join(CHECKPOINT_DIR,'baseline_frcnn_best.pth'))
+        scheduler_a.step()
+        print(f"Epoch {epoch+1}/{NUM_EPOCHS} | Loss: {loss:.4f} | Val mAP@50: {metrics['mAP_50']}")
+        results.append({"Model": "Baseline_A", 
+                        "Epoch": epoch+1,
+                         "Loss": loss,
+                         "mAP_50": metrics['mAP_50'],
+                         "mAP_50_95":metrics['mAP_50_95'],
+                         "Recall":metrics['recall']
+        })
+        pd.DataFrame(results).to_csv("benchmark_final_results.csv",index=False)
 
     # ==========================
     # 2. METHOD: SDG R-CNN (Ours)
@@ -222,17 +243,32 @@ def run_benchmark():
     model_sdg.to(DEVICE)
     
     opt_sdg = optim.SGD(model_sdg.parameters(), lr=LR, momentum=0.9, weight_decay=0.0005)
+    scheduler_sdg=torch.optim.lr_scheduler.MultiStepLR(opt_sdg,milestones=[3,4],gamma=0.1)
+
+    best_map_unbiased=0.0
 
     for epoch in range(NUM_EPOCHS):
         loss = train_epoch_sdg(model_sdg, opt_sdg, train_loader)
-        mAP = evaluate_map(model_sdg, val_loader)
-        print(f"Epoch {epoch+1}/{NUM_EPOCHS} | Loss: {loss:.4f} | Val mAP@50: {mAP:.4f}")
-        results.append({"Model": "SDG_RCNN", "Epoch": epoch+1, "Loss": loss, "mAP_50": mAP})
+        metrics=evaluate_map(model_sdg,val_loader)
+        current_map_unbiased=metrics["mAP_50"]
+        torch.save(model_sdg.state_dict(),os.path.join(CHECKPOINT_DIR,"unbiased_frcnn_last.pth"))
+        if current_map_unbiased>best_map_unbiased:
+            best_map_unbiased=current_map_unbiased
+            torch.save(model_sdg.state_dict(),os.path.join(CHECKPOINT_DIR,"unbiased_frcnn_best.pth"))
+            
+        scheduler_sdg.step()
+        print(f"Epoch {epoch+1}/{NUM_EPOCHS} | Loss: {loss:.4f} | Val mAP@50: {metrics['mAP_50']}")
+        results.append({"Model": "Unbiased_RCNN",
+                        "Epoch": epoch+1,
+                         "Loss": loss,
+                         "mAP_50": metrics['mAP_50'],
+                         "mAP_50_95":metrics['mAP_50_95'],
+                         "Recall":metrics['recall']
+        })
+        pd.DataFrame(results).to_csv("benchmark_final_results.csv",index=False)
+    print("\nBenchmark Results Saved!!!!!!!!!!!!!!")
 
-    # Save
-    df = pd.DataFrame(results)
-    df.to_csv("benchmark_final_results.csv", index=False)
-    print("\nBenchmark Finished! Results saved to 'benchmark_final_results.csv'")
+    
 
 if __name__ == "__main__":
     run_benchmark()
