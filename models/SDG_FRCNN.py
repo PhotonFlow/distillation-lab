@@ -28,6 +28,8 @@ class SDGRoIHeads(RoIHeads):
         self.cur_logits = None
         self.cur_rpn_scores = None
         self.cur_sampled_scores = None
+        self.cur_proposals = None
+        self.cur_image_shapes = None
 
     def select_training_samples(self, proposals, targets):
         self.check_targets(targets)
@@ -88,6 +90,8 @@ class SDGRoIHeads(RoIHeads):
         """
         if self.training:
             proposals, matched_idxs, labels, regression_targets = self.select_training_samples(proposals, targets)
+            self.cur_proposals = proposals
+            self.cur_image_shapes = image_shapes
         else:
             labels = None
             regression_targets = None
@@ -264,7 +268,7 @@ class SDGFasterRCNN(nn.Module):
             sam_checkpoint=sam_checkpoint
         )
         self.cal = CausalAttentionLearning()
-        self.cpl = CausalPrototypeLearning(num_classes=num_classes)
+        self.cpl = CausalPrototypeLearning(num_classes=num_classes, detach_target=True)
 
         # 5. Attention-guided RPN (Eq. 10)
         self.use_attention_rpn = use_attention_rpn
@@ -366,13 +370,13 @@ class SDGFasterRCNN(nn.Module):
             roi_feat_src = self.base_model.roi_heads.cur_box_features
             logits_src = self.base_model.roi_heads.cur_logits
             labels_src = torch.cat(self.base_model.roi_heads.cur_labels)
+            proposals_src_sampled = self.base_model.roi_heads.cur_proposals
             proposals_src = src_pass["proposals"]
             scores_src_list = src_pass["rpn_scores"]
             
             # 3. Pass 2: Augmented
             aug_pass = self._forward_base(images_aug_list, targets)
             feat_aug = list(aug_pass["features"].values())[0]
-            roi_feat_aug = self.base_model.roi_heads.cur_box_features
             logits_aug = self.base_model.roi_heads.cur_logits
             labels_aug = torch.cat(self.base_model.roi_heads.cur_labels) 
 
@@ -390,17 +394,37 @@ class SDGFasterRCNN(nn.Module):
                 aug_pass["features"], proposals_exp, aug_pass["images"].image_sizes
             )
             if logits_src_exp is None or logits_aug_exp is None:
+                exp_empty = 1
+                exp_keep_rate = 0.0
                 l_prot_exp = torch.tensor(0.0, device=logits_src.device, dtype=logits_src.dtype)
             else:
+                exp_empty = 0
+                total_props = sum(p.shape[0] for p in proposals_src) if proposals_src is not None else 0
+                kept_props = sum(p.shape[0] for p in proposals_exp) if proposals_exp is not None else 0
+                exp_keep_rate = (kept_props / total_props) if total_props > 0 else 0.0
                 l_prot_exp = self.cpl.explicit_loss(logits_src_exp, logits_aug_exp)
 
             from models.feature_adapter import _compute_prototypes, _prototype_contrastive_loss
             protos_src, present_src = _compute_prototypes(roi_feat_src, labels_src, self.cpl.num_classes)
-            protos_aug, present_aug = _compute_prototypes(roi_feat_aug, labels_aug, self.cpl.num_classes)
+
+            # Shared sampling: use source-sampled proposals to extract aug ROI features
+            if proposals_src_sampled is not None and sum(p.shape[0] for p in proposals_src_sampled) > 0:
+                roi_feat_aug_shared = self.base_model.roi_heads.box_roi_pool(
+                    aug_pass["features"], proposals_src_sampled, aug_pass["images"].image_sizes
+                )
+                roi_feat_aug_shared = self.base_model.roi_heads.box_head(roi_feat_aug_shared)
+                protos_aug, present_aug = _compute_prototypes(
+                    roi_feat_aug_shared, labels_src, self.cpl.num_classes
+                )
+            else:
+                protos_aug, present_aug = _compute_prototypes(
+                    roi_feat_src, labels_src, self.cpl.num_classes
+                )
 
             l_prot_imp = _prototype_contrastive_loss(
                 protos_src, present_src, protos_aug, present_aug, self.cpl.temperature
             )
+            imp_no_common = 1 if not (present_src & present_aug).any() else 0
             l_prot_final = l_prot_exp + l_prot_imp
             
             sup_loss = sum(loss for loss in src_pass["losses"].values())
@@ -418,7 +442,10 @@ class SDGFasterRCNN(nn.Module):
                 "att_loss": l_att,
                 "prot_loss": l_prot_final,
                 "prot_exp": l_prot_exp,
-                "prot_imp": l_prot_imp
+                "prot_imp": l_prot_imp,
+                "exp_empty": exp_empty,
+                "exp_keep_rate": exp_keep_rate,
+                "imp_no_common": imp_no_common
             }
 
         else:

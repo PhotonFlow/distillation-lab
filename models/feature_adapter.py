@@ -320,10 +320,16 @@ class GlobalLocalTransformation(nn.Module):
 class CausalAttentionLearning(nn.Module):
     """Causal Attention Learning (CAL) module with Dice loss."""
 
-    def __init__(self, binarize_threshold: Optional[float] = None, dice_eps: float = 1.0) -> None:
+    def __init__(
+        self,
+        binarize_threshold: Optional[float] = None,
+        dice_eps: float = 1.0,
+        use_ste: bool = True,
+    ) -> None:
         super().__init__()
         self.binarize_threshold = binarize_threshold
         self.dice_eps = dice_eps
+        self.use_ste = use_ste
 
     @staticmethod
     def attention_map(features: torch.Tensor) -> torch.Tensor:
@@ -335,7 +341,11 @@ class CausalAttentionLearning(nn.Module):
             thresh = att.mean(dim=(2, 3), keepdim=True)
         else:
             thresh = torch.tensor(self.binarize_threshold, device=att.device, dtype=att.dtype)
-        return (att >= thresh).to(att.dtype)
+        hard = (att >= thresh).to(att.dtype)
+        if self.use_ste:
+            # Straight-through estimator: hard mask in forward, identity in backward.
+            return hard + (att - att.detach())
+        return hard
 
     def dice_loss(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
         intersection = (a * b).sum(dim=(1, 2, 3))

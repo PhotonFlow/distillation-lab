@@ -19,12 +19,12 @@ from models.SDG_FRCNN import SDGFasterRCNN
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 NUM_CLASSES = 81 
 BATCH_SIZE = 4
-NUM_EPOCHS = 40
+NUM_EPOCHS = 4
 LR = 0.001
 FIXED_SIZE = (640, 640) 
 CHECKPOINT_DIR="./checkpoints"
 os.makedirs(CHECKPOINT_DIR,exist_ok=True)
-WARMUP_EPOCHS = 15
+WARMUP_EPOCHS = 2
 LAMBDA_ATT_START = 0.0
 LAMBDA_ATT_END = 0.1
 LAMBDA_PROT_START = 0.0
@@ -55,7 +55,7 @@ def linear_warmup(epoch, warmup_epochs, start, end):
         return end
     if epoch >= warmup_epochs:
         return end
-    return start + (end - start) * float(epoch + 1) / float(warmup_epochs)
+    return start + (end - start) * float(epoch) / float(warmup_epochs)
 class COCOWrapper(Dataset):
     def __init__(self, root, ann, transforms=None):
         self.coco = CocoDetection(root, ann)
@@ -171,6 +171,12 @@ def train_epoch_sdg(model, optimizer, loader):
     total_loss = 0
     prot_loss_sum = 0
     att_loss_sum = 0
+    prot_exp_sum = 0
+    prot_imp_sum = 0
+    exp_empty_batches = 0
+    exp_keep_rate_sum = 0.0
+    exp_keep_rate_count = 0
+    imp_no_common_batches = 0
     
     for images, targets in tqdm(loader, desc="  Train SDG", leave=False):
         images = list(image.to(DEVICE) for image in images)
@@ -187,9 +193,28 @@ def train_epoch_sdg(model, optimizer, loader):
         total_loss += loss.item()
         prot_loss_sum += out['prot_loss'].item()
         att_loss_sum += out['att_loss'].item()
+        prot_exp_sum += out.get('prot_exp', torch.tensor(0.0)).item()
+        prot_imp_sum += out.get('prot_imp', torch.tensor(0.0)).item()
+        exp_empty_batches += int(out.get('exp_empty', 0))
+        imp_no_common_batches += int(out.get('imp_no_common', 0))
+        exp_keep_rate = out.get('exp_keep_rate', None)
+        if exp_keep_rate is not None:
+            exp_keep_rate_sum += float(exp_keep_rate)
+            exp_keep_rate_count += 1
         
     avg_loss = total_loss / len(loader)
-    print(f"    [Details] Total: {avg_loss:.3f} | Prot: {prot_loss_sum/len(loader):.3f} | Att: {att_loss_sum/len(loader):.3f}")
+    avg_prot_exp = prot_exp_sum / len(loader)
+    avg_prot_imp = prot_imp_sum / len(loader)
+    exp_keep_rate_avg = exp_keep_rate_sum / exp_keep_rate_count if exp_keep_rate_count > 0 else 0.0
+    print(
+        "    [Details] "
+        f"Total: {avg_loss:.3f} | Prot: {prot_loss_sum/len(loader):.3f} | "
+        f"Att: {att_loss_sum/len(loader):.3f} | "
+        f"ProtExp: {avg_prot_exp:.3f} | ProtImp: {avg_prot_imp:.3f} | "
+        f"ExpEmpty: {exp_empty_batches}/{len(loader)} | "
+        f"ImpNoCommon: {imp_no_common_batches}/{len(loader)} | "
+        f"KeepRate: {exp_keep_rate_avg:.3f}"
+    )
     return avg_loss
 
 # --- 4. Main Runner ---
