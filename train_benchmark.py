@@ -1,3 +1,4 @@
+import json
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
@@ -17,7 +18,6 @@ from models.SDG_FRCNN import SDGFasterRCNN
 
 # --- Configuration ---
 DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-NUM_CLASSES = 81 
 BATCH_SIZE = 4
 NUM_EPOCHS = 4
 LR = 0.001
@@ -36,6 +36,16 @@ TRAIN_IMG = "./datasets/custom_benchmark/train/images"
 TRAIN_ANN = "./datasets/custom_benchmark/train/annotations/train.json"
 VAL_IMG = "./datasets/custom_benchmark/val_ood/images"
 VAL_ANN = "./datasets/custom_benchmark/val_ood/annotations/val.json"
+
+def infer_num_classes(ann_path: str) -> int:
+    with open(ann_path, "r") as f:
+        data = json.load(f)
+    categories = data.get("categories", [])
+    if not categories:
+        raise ValueError(f"No categories found in {ann_path}")
+    return len(categories) + 1  # +1 for background class
+
+NUM_CLASSES = infer_num_classes(TRAIN_ANN)
 
 # --- 1. Data Loading Utils ---
 
