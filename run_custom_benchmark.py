@@ -221,6 +221,8 @@ def _load_state_dict(checkpoint_path: Path) -> dict:
             return state["model"]
         if "state_dict" in state and isinstance(state["state_dict"], dict):
             return state["state_dict"]
+    if hasattr(state, "state_dict"):
+        return state.state_dict()
     return state
 
 
@@ -233,6 +235,8 @@ def build_sdg_model(num_classes: int, checkpoint_path: Path):
         explicit_rpn_thresh=0.7,
     )
     state_dict = _load_state_dict(checkpoint_path)
+    if not isinstance(state_dict, dict):
+        raise RuntimeError(f"Unexpected checkpoint type for SDG: {type(state_dict)}")
     missing, unexpected = model.load_state_dict(state_dict, strict=False)
     if missing or unexpected:
         print(f"[SDG] Missing keys: {missing}")
@@ -265,7 +269,9 @@ def build_rfdetr_model(variant: str, num_classes: int, checkpoint_path: Path):
 
     model = cls(**kwargs)
     state_dict = _load_state_dict(checkpoint_path)
-    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    if not isinstance(state_dict, dict):
+        raise RuntimeError(f"Unexpected checkpoint type for RF-DETR: {type(state_dict)}")
+    missing, unexpected = _load_rfdetr_state_dict(model, state_dict)
     if missing or unexpected:
         print(f"[RF-DETR] Missing keys: {missing}")
         print(f"[RF-DETR] Unexpected keys: {unexpected}")
@@ -274,6 +280,52 @@ def build_rfdetr_model(variant: str, num_classes: int, checkpoint_path: Path):
     if hasattr(model, "eval"):
         model.eval()
     return model
+
+
+def _load_rfdetr_state_dict(model, state_dict: dict):
+    def _try_load(target, label: str):
+        missing, unexpected = target.load_state_dict(state_dict, strict=False)
+        print(f"[RF-DETR] Loaded state_dict into {label}.")
+        return missing, unexpected
+
+    if hasattr(model, "load_state_dict"):
+        try:
+            return _try_load(model, "model")
+        except Exception:
+            pass
+
+    for attr in ("model", "detector", "net", "module"):
+        inner = getattr(model, attr, None)
+        if inner is not None and hasattr(inner, "load_state_dict"):
+            try:
+                return _try_load(inner, f"model.{attr}")
+            except Exception:
+                pass
+
+    # Attempt to strip common prefixes if needed
+    stripped = {}
+    for k, v in state_dict.items():
+        if isinstance(k, str) and k.startswith("model."):
+            stripped[k[6:]] = v
+        elif isinstance(k, str) and k.startswith("module."):
+            stripped[k[7:]] = v
+        else:
+            stripped[k] = v
+
+    for attr in ("model", "detector", "net", "module"):
+        inner = getattr(model, attr, None)
+        if inner is not None and hasattr(inner, "load_state_dict"):
+            try:
+                missing, unexpected = inner.load_state_dict(stripped, strict=False)
+                print(f"[RF-DETR] Loaded stripped state_dict into model.{attr}.")
+                return missing, unexpected
+            except Exception:
+                continue
+
+    raise AttributeError(
+        "RF-DETR model has no load_state_dict. "
+        "Check the RF-DETR version or provide a compatible checkpoint."
+    )
 
 
 def _tensor_to_numpy_image(image_tensor: torch.Tensor) -> np.ndarray:
