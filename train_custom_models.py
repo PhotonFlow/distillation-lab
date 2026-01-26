@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import shutil
@@ -20,6 +21,7 @@ TRAIN_ANN = REPO_ROOT / "datasets/custom_benchmark/train/annotations/train.json"
 VAL_IMG = REPO_ROOT / "datasets/custom_benchmark/val_ood/images"
 VAL_ANN = REPO_ROOT / "datasets/custom_benchmark/val_ood/annotations/val.json"
 OUTPUT_DIR = REPO_ROOT / "checkpoints/custom_training"
+RESULTS_CSV = REPO_ROOT / "benchmark_final_results.csv"
 
 EPOCHS = 4
 BATCH_SIZE = 4
@@ -28,7 +30,7 @@ DEVICE = "cuda"  # Set to "cuda", "cpu", or None for auto-select
 
 # RF-DETR options
 RFDETR_VARIANT = "base"  # "base", "small", "medium"
-RFDETR_COPY_IMAGES = False  # If symlink fails, set True to copy images
+RFDETR_COPY_IMAGES = True  # If symlink fails, set True to copy images
 
 # YOLOv8 options
 YOLOV8_MODEL = "yolov8n.pt"
@@ -105,6 +107,97 @@ def _dump_yaml(data: dict, path: Path) -> None:
         yaml.safe_dump(data, f, sort_keys=False)
 
 
+def _safe_index(values: list, idx: int) -> float | None:
+    if not isinstance(values, list):
+        return None
+    if idx < 0 or idx >= len(values):
+        return None
+    try:
+        return float(values[idx])
+    except (TypeError, ValueError):
+        return None
+
+
+def _write_results_csv(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    headers = ["Model", "Epoch", "Loss", "mAP_50", "mAP_50_95", "Recall"]
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in headers})
+
+
+def _collect_rfdetr_results(log_path: Path, model_name: str) -> list[dict]:
+    if not log_path.exists():
+        return []
+    results: list[dict] = []
+    with log_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            epoch = entry.get("epoch")
+            if epoch is None:
+                continue
+            loss = entry.get("train_loss")
+            if loss is None:
+                loss = entry.get("train_loss_unscaled")
+            test_eval = entry.get("test_coco_eval_bbox")
+            results.append({
+                "Model": model_name,
+                "Epoch": int(epoch) + 1,
+                "Loss": loss,
+                "mAP_50": _safe_index(test_eval, 1),
+                "mAP_50_95": _safe_index(test_eval, 0),
+                "Recall": _safe_index(test_eval, 8),
+            })
+    return results
+
+
+def _collect_yolov8_results(results_csv: Path, model_name: str) -> list[dict]:
+    if not results_csv.exists():
+        return []
+    results: list[dict] = []
+    with results_csv.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            epoch = row.get("epoch")
+            if epoch is None or epoch == "":
+                continue
+            try:
+                epoch_val = int(float(epoch)) + 1
+            except ValueError:
+                continue
+            def _get_float(key: str) -> float | None:
+                value = row.get(key)
+                if value is None or value == "":
+                    return None
+                try:
+                    return float(value)
+                except ValueError:
+                    return None
+            train_box = _get_float("train/box_loss")
+            train_cls = _get_float("train/cls_loss")
+            train_dfl = _get_float("train/dfl_loss")
+            loss = None
+            if train_box is not None and train_cls is not None and train_dfl is not None:
+                loss = train_box + train_cls + train_dfl
+            results.append({
+                "Model": model_name,
+                "Epoch": epoch_val,
+                "Loss": loss,
+                "mAP_50": _get_float("metrics/mAP50(B)"),
+                "mAP_50_95": _get_float("metrics/mAP50-95(B)"),
+                "Recall": _get_float("metrics/recall(B)"),
+            })
+    return results
+
+
 def find_checkpoint(root: Path, prefer_tokens: list[str]) -> Path | None:
     if not root.exists():
         return None
@@ -136,21 +229,67 @@ def export_state_dict(weights_path: Path, output_path: Path) -> None:
     torch.save(state_dict, output_path)
 
 
-def _try_symlink(src: Path, dst: Path) -> bool:
-    try:
-        if dst.exists():
-            return True
-        os.symlink(src, dst, target_is_directory=True)
-        return True
-    except OSError:
-        return False
-
-
-def _copy_images(src_dir: Path, dst_dir: Path) -> None:
+def _populate_images(src_dir: Path, dst_dir: Path, copy_images: bool) -> None:
     dst_dir.mkdir(parents=True, exist_ok=True)
     for img_path in src_dir.iterdir():
-        if img_path.is_file():
-            shutil.copy2(img_path, dst_dir / img_path.name)
+        if not img_path.is_file():
+            continue
+        dst_path = dst_dir / img_path.name
+        if dst_path.exists():
+            continue
+        if copy_images:
+            shutil.copy2(img_path, dst_path)
+        else:
+            try:
+                os.symlink(img_path, dst_path)
+            except OSError as exc:
+                raise RuntimeError(
+                    "RF-DETR dataset prep could not create a symlink for images. "
+                    "Set RFDETR_COPY_IMAGES = True to copy images instead."
+                ) from exc
+
+
+def _load_coco_category_mapping(ann_path: Path) -> tuple[dict[int, int], list[dict]]:
+    with ann_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    categories = data.get("categories", [])
+    if not categories:
+        raise ValueError(f"No categories found in {ann_path}")
+
+    id_map: dict[int, int] = {}
+    new_categories: list[dict] = []
+    for new_id, cat in enumerate(categories):
+        old_id = cat.get("id")
+        if old_id is None:
+            raise ValueError(f"Category missing 'id' in {ann_path}")
+        if old_id in id_map:
+            raise ValueError(f"Duplicate category id {old_id} in {ann_path}")
+        id_map[int(old_id)] = new_id
+        new_cat = dict(cat)
+        new_cat["id"] = new_id
+        new_categories.append(new_cat)
+    return id_map, new_categories
+
+
+def _rewrite_coco_annotations(
+    src_ann: Path,
+    dst_ann: Path,
+    id_map: dict[int, int],
+    categories: list[dict],
+) -> None:
+    with src_ann.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    data["categories"] = categories
+    for ann in data.get("annotations", []):
+        old_id = ann.get("category_id")
+        if old_id is None:
+            raise ValueError(f"Annotation missing 'category_id' in {src_ann}")
+        if int(old_id) not in id_map:
+            raise ValueError(f"Unknown category_id {old_id} in {src_ann}")
+        ann["category_id"] = id_map[int(old_id)]
+    dst_ann.parent.mkdir(parents=True, exist_ok=True)
+    with dst_ann.open("w", encoding="utf-8") as f:
+        json.dump(data, f)
 
 
 def prepare_rfdetr_dataset(args) -> Path:
@@ -164,38 +303,18 @@ def prepare_rfdetr_dataset(args) -> Path:
     train_img = Path(args.train_img)
     val_img = Path(args.val_img)
 
-    if not _try_symlink(train_img, train_dir / "images"):
-        if args.rfdetr_copy_images:
-            _copy_images(train_img, train_dir / "images")
-        else:
-            raise RuntimeError(
-                "RF-DETR dataset prep could not create a symlink for train images. "
-                "Set RFDETR_COPY_IMAGES = True to copy images instead."
-            )
-    if not _try_symlink(val_img, valid_dir / "images"):
-        if args.rfdetr_copy_images:
-            _copy_images(val_img, valid_dir / "images")
-        else:
-            raise RuntimeError(
-                "RF-DETR dataset prep could not create a symlink for val images. "
-                "Set RFDETR_COPY_IMAGES = True to copy images instead."
-            )
-    if not _try_symlink(val_img, test_dir / "images"):
-        if args.rfdetr_copy_images:
-            _copy_images(val_img, test_dir / "images")
-        else:
-            raise RuntimeError(
-                "RF-DETR dataset prep could not create a symlink for test images. "
-                "Set RFDETR_COPY_IMAGES = True to copy images instead."
-            )
+    _populate_images(train_img, train_dir, args.rfdetr_copy_images)
+    _populate_images(val_img, valid_dir, args.rfdetr_copy_images)
+    _populate_images(val_img, test_dir, args.rfdetr_copy_images)
 
-    shutil.copy2(Path(args.train_ann), train_dir / "_annotations.coco.json")
-    shutil.copy2(Path(args.val_ann), valid_dir / "_annotations.coco.json")
-    shutil.copy2(Path(args.val_ann), test_dir / "_annotations.coco.json")
+    id_map, categories = _load_coco_category_mapping(Path(args.train_ann))
+    _rewrite_coco_annotations(Path(args.train_ann), train_dir / "_annotations.coco.json", id_map, categories)
+    _rewrite_coco_annotations(Path(args.val_ann), valid_dir / "_annotations.coco.json", id_map, categories)
+    _rewrite_coco_annotations(Path(args.val_ann), test_dir / "_annotations.coco.json", id_map, categories)
     return dataset_root
 
 
-def train_rfdetr(args) -> None:
+def train_rfdetr(args, results: list[dict]) -> None:
     try:
         from rfdetr import RFDETRBase, RFDETRMedium, RFDETRSmall
     except ImportError as exc:
@@ -224,6 +343,11 @@ def train_rfdetr(args) -> None:
     ckpt = find_checkpoint(output_dir, prefer_tokens=["best", "model_best"])
     if ckpt:
         export_state_dict(ckpt, output_dir / "rfdetr_best.pth")
+
+    model_label = f"RF-DETR ({args.rfdetr_variant})"
+    log_path = output_dir / "log.txt"
+    results.extend(_collect_rfdetr_results(log_path, model_label))
+    _write_results_csv(RESULTS_CSV, results)
 
 
 def convert_coco_to_yolo(
@@ -291,7 +415,7 @@ def write_yolo_data_yaml(
     _dump_yaml(data, output_path)
 
 
-def train_yolov8(args, class_names: list[str], class_id_map: dict[int, int]) -> None:
+def train_yolov8(args, class_names: list[str], class_id_map: dict[int, int], results: list[dict]) -> None:
     try:
         from ultralytics import YOLO
     except ImportError as exc:
@@ -339,6 +463,11 @@ def train_yolov8(args, class_names: list[str], class_id_map: dict[int, int]) -> 
     if best_pt.exists():
         export_state_dict(best_pt, output_dir / "yolov8_best.pth")
 
+    results_csv = save_dir / "results.csv"
+    model_label = f"YOLOv8 ({args.yolov8_model})"
+    results.extend(_collect_yolov8_results(results_csv, model_label))
+    _write_results_csv(RESULTS_CSV, results)
+
 
 def main() -> None:
     settings = get_settings()
@@ -356,12 +485,13 @@ def main() -> None:
 
     class_names, class_id_map = load_coco_categories(Path(settings.train_ann))
 
+    results: list[dict] = []
     for model_name in selected:
         print(f"\n=== Training: {model_name} ===")
         if model_name == "rfdetr":
-            train_rfdetr(settings)
+            train_rfdetr(settings, results)
         elif model_name == "yolov8":
-            train_yolov8(settings, class_names, class_id_map)
+            train_yolov8(settings, class_names, class_id_map, results)
         else:
             raise ValueError(f"Unsupported model: {model_name}")
 
