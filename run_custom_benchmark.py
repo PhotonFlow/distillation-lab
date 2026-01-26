@@ -15,19 +15,17 @@ from torchmetrics.detection.mean_ap import MeanAveragePrecision
 
 from models.SDG_FRCNN import SDGFasterRCNN
 
-# ----------------------------------------
-# Config
-# ----------------------------------------
-BENCHMARK_ROOT = Path("./datasets/custom_benchmark_splits")
-OUTPUT_CSV = Path("./custom_benchmark_inference_results.csv")
+
+BENCHMARK_ROOT = Path("./datasets/custom_benchmark_splits_KIONA")
+OUTPUT_CSV = Path("./custom_benchmark_inference_results_KIONA.csv")
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 FIXED_SIZE = (640, 640)
 
-SDG_CHECKPOINT = Path("./checkpoints/unbiased_frcnn_best.pth")
+SDG_CHECKPOINT = Path("./checkpoints_KIONA/unbiased_frcnn_best_KIONA.pth")
 
 RFDETR_VARIANT = "base"  # "base", "small", "medium"
-RFDETR_CHECKPOINT = Path("./checkpoints/custom_training/rfdetr/rfdetr_best.pth")
+RFDETR_CHECKPOINT = Path("./checkpoints_comp/custom_training/rfdetr/checkpoint_best_regular.pth")
 RFDETR_SCORE_THRESHOLD = 0.001
 ALLOW_UNSAFE_LOAD = True
 
