@@ -1,6 +1,8 @@
+import argparse
 import csv
 import inspect
 import json
+import pickle
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +29,7 @@ SDG_CHECKPOINT = Path("./checkpoints/unbiased_frcnn_best.pth")
 RFDETR_VARIANT = "base"  # "base", "small", "medium"
 RFDETR_CHECKPOINT = Path("./checkpoints/custom_training/rfdetr/rfdetr_best.pth")
 RFDETR_SCORE_THRESHOLD = 0.001
+ALLOW_UNSAFE_LOAD = True
 
 MODEL_SPECS = [
     {
@@ -172,10 +175,49 @@ def evaluate_torchvision_detector(model, loader):
     }
 
 
+def _torch_load_weights(checkpoint_path: Path):
+    load_kwargs = {"map_location": "cpu"}
+    supports_weights_only = False
+    try:
+        supports_weights_only = "weights_only" in inspect.signature(torch.load).parameters
+    except (TypeError, ValueError):
+        supports_weights_only = False
+
+    if supports_weights_only:
+        try:
+            return torch.load(checkpoint_path, weights_only=True, **load_kwargs)
+        except pickle.UnpicklingError as exc:
+            msg = str(exc)
+            if "Weights only load failed" not in msg:
+                raise
+
+            safe_globals = getattr(torch.serialization, "safe_globals", None)
+            if safe_globals is not None:
+                try:
+                    with safe_globals([argparse.Namespace]):
+                        return torch.load(checkpoint_path, weights_only=True, **load_kwargs)
+                except Exception:
+                    pass
+
+            if not ALLOW_UNSAFE_LOAD:
+                raise RuntimeError(
+                    "Checkpoint contains non-weight objects and ALLOW_UNSAFE_LOAD=False. "
+                    "Enable ALLOW_UNSAFE_LOAD only for trusted checkpoints."
+                ) from exc
+
+            print(
+                "[load] weights_only failed; retrying with weights_only=False. "
+                "Only do this for trusted checkpoints."
+            )
+            return torch.load(checkpoint_path, weights_only=False, **load_kwargs)
+
+    return torch.load(checkpoint_path, **load_kwargs)
+
+
 def _load_state_dict(checkpoint_path: Path) -> dict:
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-    state = torch.load(checkpoint_path, map_location="cpu")
+    state = _torch_load_weights(checkpoint_path)
     if isinstance(state, dict):
         if "model" in state and isinstance(state["model"], dict):
             return state["model"]
