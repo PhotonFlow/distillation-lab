@@ -7,44 +7,31 @@ C:\Users\a0110610\distillation-lab\clean-env\lib\site-packages\torchvision\model
 Swapping standard RoIHeads with SDGRoIHeads...
 RoIHeads Swap Successful.
 Loading pretrain weights
+[RF-DETR] Loaded filtered state_dict into discovered module.
+[RF-DETR] Missing keys: ['transformer.enc_out_class_embed.0.weight', 'transformer.enc_out_class_embed.0.bias', 'transformer.enc_out_class_embed.1.weight', 'transformer.enc_out_class_embed.1.bias', 'transformer.enc_out_class_embed.2.weight', 'transformer.enc_out_class_embed.2.bias', 'transformer.enc_out_class_embed.3.weight', 'transformer.enc_out_class_embed.3.bias', 'transformer.enc_out_class_embed.4.weight', 'transformer.enc_out_class_embed.4.bias', 'transformer.enc_out_class_embed.5.weight', 'transformer.enc_out_class_embed.5.bias', 'transformer.enc_out_class_embed.6.weight', 'transformer.enc_out_class_embed.6.bias', 'transformer.enc_out_class_embed.7.weight', 'transformer.enc_out_class_embed.7.bias', 'transformer.enc_out_class_embed.8.weight', 'transformer.enc_out_class_embed.8.bias', 'transformer.enc_out_class_embed.9.weight', 'transformer.enc_out_class_embed.9.bias', 'transformer.enc_out_class_embed.10.weight', 'transformer.enc_out_class_embed.10.bias', 'transformer.enc_out_class_embed.11.weight', 'transformer.enc_out_class_embed.11.bias', 'transformer.enc_out_class_embed.12.weight', 'transformer.enc_out_class_embed.12.bias', 'class_embed.weight', 'class_embed.bias']
+[RF-DETR] Unexpected keys: []
+--> Eval: SDG Faster R-CNN (train_benchmark) on subset_1_severity_1/clean
+loading annotations into memory...
+Done (t=0.01s)
+creating index...
+index created!
+--> Eval: RF-DETR (base) (train_custom_models) on subset_1_severity_1/clean
+loading annotations into memory...
+Done (t=0.01s)
+creating index...
+index created!
+Model is not optimized for inference. Latency may be higher than expected. You can optimize the model for inference by calling model.optimize_for_inference().
+UserWarning: torch.meshgrid: in an upcoming release, it will be required to pass the indexing argument. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\TensorShape.cpp:4316.)
 Traceback (most recent call last):
-  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 669, in <module>
+  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 776, in <module>
     main()
-  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 599, in main
-    built_models[spec["name"]] = build_rfdetr_model(
-  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 305, in build_rfdetr_model
-    model, missing, unexpected = _load_rfdetr_state_dict(model, state_dict, checkpoint_path)
-  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 442, in _load_rfdetr_state_dict
-    missing, unexpected = target.load_state_dict(state_dict, strict=False)
-  File "C:\Users\a0110610\distillation-lab\clean-env\lib\site-packages\torch\nn\modules\module.py", line 2593, in load_state_dict
-    raise RuntimeError(
-RuntimeError: Error(s) in loading state_dict for LWDETR:
-        size mismatch for transformer.enc_out_class_embed.0.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for transformer.enc_out_class_embed.0.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
-        size mismatch for transformer.enc_out_class_embed.1.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for transformer.enc_out_class_embed.1.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
-        size mismatch for transformer.enc_out_class_embed.2.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for transformer.enc_out_class_embed.2.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
-        size mismatch for transformer.enc_out_class_embed.3.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for transformer.enc_out_class_embed.3.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
-        size mismatch for transformer.enc_out_class_embed.4.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for transformer.enc_out_class_embed.4.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
-        size mismatch for transformer.enc_out_class_embed.5.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for transformer.enc_out_class_embed.5.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
-        size mismatch for transformer.enc_out_class_embed.6.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for transformer.enc_out_class_embed.6.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
-        size mismatch for transformer.enc_out_class_embed.7.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for transformer.enc_out_class_embed.7.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
-        size mismatch for transformer.enc_out_class_embed.8.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for transformer.enc_out_class_embed.8.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
-        size mismatch for transformer.enc_out_class_embed.9.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for transformer.enc_out_class_embed.9.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
-        size mismatch for transformer.enc_out_class_embed.10.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for transformer.enc_out_class_embed.10.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
-        size mismatch for transformer.enc_out_class_embed.11.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for transformer.enc_out_class_embed.11.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
-        size mismatch for transformer.enc_out_class_embed.12.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for transformer.enc_out_class_embed.12.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
-        size mismatch for class_embed.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
-        size mismatch for class_embed.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 745, in main
+    metrics = evaluate_rfdetr(
+  File "C:\Users\a0110610\distillation-lab\clean-env\lib\site-packages\torch\utils\_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 654, in evaluate_rfdetr
+    pred = _normalize_rfdetr_output(output, pred_label_offset=pred_label_offset)
+  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 615, in _normalize_rfdetr_output
+    labels = getattr(output, "labels", None) or getattr(output, "class_id", None) or getattr(
+ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
 (clean-env) PS C:\Users\a0110610\distillation-lab> 
