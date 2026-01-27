@@ -8,11 +8,14 @@ Swapping standard RoIHeads with SDGRoIHeads...
 RoIHeads Swap Successful.
 Loading pretrain weights
 Traceback (most recent call last):
-  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 473, in <module>
+  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 525, in <module>
     main()
-  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 403, in main
+  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 455, in main
     built_models[spec["name"]] = build_rfdetr_model(
-  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 268, in build_rfdetr_model
-    missing, unexpected = model.load_state_dict(state_dict, strict=False)
-AttributeError: 'RFDETRBase' object has no attribute 'load_state_dict'
-(clean-env) PS C:\Users\a0110610\distillation-lab> 
+  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 274, in build_rfdetr_model
+    missing, unexpected = _load_rfdetr_state_dict(model, state_dict)
+  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 325, in _load_rfdetr_state_dict
+    raise AttributeError(
+AttributeError: RF-DETR model has no load_state_dict. Check the RF-DETR version or provide a compatible checkpoint.
+(clean-env) PS C:\Users\a0110610\distillation-lab>
+
