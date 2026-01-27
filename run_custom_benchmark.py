@@ -271,14 +271,6 @@ def build_rfdetr_model(variant: str, num_classes: int, checkpoint_path: Path):
     else:
         cls = RFDETRBase
 
-    kwargs = {}
-    try:
-        sig = inspect.signature(cls)
-        if "num_classes" in sig.parameters:
-            kwargs["num_classes"] = num_classes
-    except (TypeError, ValueError):
-        pass
-
     state = _torch_load_weights(checkpoint_path)
     state_dict = _extract_state_dict(state)
     if not isinstance(state_dict, dict):
@@ -294,6 +286,9 @@ def build_rfdetr_model(variant: str, num_classes: int, checkpoint_path: Path):
     model_head_classes = _infer_model_head_classes(model)
 
     if ckpt_head_classes and model_head_classes and model_head_classes != ckpt_head_classes:
+        print(
+            f"[RF-DETR] Head classes mismatch: checkpoint={ckpt_head_classes}, model={model_head_classes}."
+        )
         offset = 0
         if used_num_classes is not None:
             offset = model_head_classes - used_num_classes
@@ -301,6 +296,15 @@ def build_rfdetr_model(variant: str, num_classes: int, checkpoint_path: Path):
         if alt_num_classes != used_num_classes:
             model, used_num_classes = _instantiate_rfdetr(cls, alt_num_classes)
             model_head_classes = _infer_model_head_classes(model)
+
+    if ckpt_head_classes and model_head_classes and model_head_classes != ckpt_head_classes:
+        adapted = _adapt_rfdetr_heads(model, ckpt_head_classes)
+        if adapted:
+            model_head_classes = _infer_model_head_classes(model)
+            print(
+                f"[RF-DETR] Adjusted model heads to {model_head_classes} classes "
+                f"(checkpoint={ckpt_head_classes})."
+            )
 
     model, missing, unexpected = _load_rfdetr_state_dict(model, state_dict, checkpoint_path)
     if missing or unexpected:
@@ -381,6 +385,86 @@ def _resolve_rfdetr_num_classes(dataset_classes: int | None, ckpt_head_classes: 
     return max(1, ckpt_head_classes - 1)
 
 
+def _adapt_rfdetr_heads(model, target_head_classes: int) -> bool:
+    if target_head_classes is None:
+        return False
+    core = _find_rfdetr_core(model)
+    if core is None:
+        return False
+    updated = False
+    updated |= _resize_linear_attr(core, "class_embed", target_head_classes)
+
+    transformer = getattr(core, "transformer", None)
+    if transformer is not None:
+        updated |= _resize_linear_attr(transformer, "enc_out_class_embed", target_head_classes)
+    updated |= _resize_linear_attr(core, "enc_out_class_embed", target_head_classes)
+
+    for obj in (model, core, transformer):
+        if obj is not None and hasattr(obj, "num_classes"):
+            try:
+                setattr(obj, "num_classes", target_head_classes)
+            except Exception:
+                pass
+    return updated
+
+
+def _find_rfdetr_core(model):
+    for attr in ("model", "detector", "net", "module"):
+        inner = getattr(model, attr, None)
+        if inner is not None:
+            if hasattr(inner, "class_embed") or hasattr(inner, "transformer"):
+                return inner
+    if hasattr(model, "class_embed") or hasattr(model, "transformer"):
+        return model
+    return _find_loadable_module(model)
+
+
+def _resize_linear_attr(obj, attr: str, out_features: int) -> bool:
+    import torch.nn as nn
+
+    if not hasattr(obj, attr):
+        return False
+    layer = getattr(obj, attr)
+    updated = False
+
+    def _new_linear(old: nn.Linear) -> nn.Linear:
+        new = nn.Linear(old.in_features, out_features, bias=old.bias is not None)
+        new = new.to(device=old.weight.device, dtype=old.weight.dtype)
+        return new
+
+    if isinstance(layer, nn.Linear):
+        if layer.out_features != out_features:
+            setattr(obj, attr, _new_linear(layer))
+            updated = True
+        return updated
+
+    if isinstance(layer, nn.ModuleList):
+        new_list = []
+        for item in layer:
+            if isinstance(item, nn.Linear) and item.out_features != out_features:
+                new_list.append(_new_linear(item))
+                updated = True
+            else:
+                new_list.append(item)
+        if updated:
+            setattr(obj, attr, nn.ModuleList(new_list))
+        return updated
+
+    if isinstance(layer, (list, tuple)):
+        new_list = []
+        for item in layer:
+            if isinstance(item, nn.Linear) and item.out_features != out_features:
+                new_list.append(_new_linear(item))
+                updated = True
+            else:
+                new_list.append(item)
+        if updated:
+            setattr(obj, attr, nn.ModuleList(new_list))
+        return updated
+
+    return False
+
+
 def _load_rfdetr_state_dict(model, state_dict: dict, checkpoint_path: Path):
     def _try_load(target, label: str):
         missing, unexpected = target.load_state_dict(state_dict, strict=False)
@@ -439,9 +523,15 @@ def _load_rfdetr_state_dict(model, state_dict: dict, checkpoint_path: Path):
     # Fallback: search for any loadable torch module attached to the wrapper
     target = _find_loadable_module(model)
     if target is not None:
-        missing, unexpected = target.load_state_dict(state_dict, strict=False)
-        print("[RF-DETR] Loaded state_dict into discovered module.")
-        return model, missing, unexpected
+        try:
+            missing, unexpected = target.load_state_dict(state_dict, strict=False)
+            print("[RF-DETR] Loaded state_dict into discovered module.")
+            return model, missing, unexpected
+        except RuntimeError:
+            filtered = _filter_state_dict_by_shape(target, state_dict)
+            missing, unexpected = target.load_state_dict(filtered, strict=False)
+            print("[RF-DETR] Loaded filtered state_dict into discovered module.")
+            return model, missing, unexpected
 
     raise AttributeError(
         "RF-DETR model has no load_state_dict. "
@@ -470,6 +560,23 @@ def _find_loadable_module(obj, max_depth: int = 2):
                 continue
             queue.append((value, depth + 1))
     return None
+
+
+def _filter_state_dict_by_shape(target, state_dict: dict) -> dict:
+    filtered = {}
+    try:
+        target_state = target.state_dict()
+    except Exception:
+        return filtered
+    for key, value in state_dict.items():
+        if key not in target_state:
+            continue
+        target_tensor = target_state[key]
+        if hasattr(target_tensor, "shape") and hasattr(value, "shape"):
+            if tuple(target_tensor.shape) != tuple(value.shape):
+                continue
+        filtered[key] = value
+    return filtered
 
 
 def _tensor_to_numpy_image(image_tensor: torch.Tensor) -> np.ndarray:
