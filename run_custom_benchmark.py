@@ -25,7 +25,7 @@ FIXED_SIZE = (640, 640)
 SDG_CHECKPOINT = Path("./checkpoints_KIONA/unbiased_frcnn_best_KIONA.pth")
 
 RFDETR_VARIANT = "base"  # "base", "small", "medium"
-RFDETR_CHECKPOINT = Path("./checkpoints_comp/custom_training/rfdetr/checkpoint_best_regular.pth")
+RFDETR_CHECKPOINT = Path("checkpoints_KIONA_comp/custom_training/rfdetr/checkpoint_best_total.pth")
 RFDETR_SCORE_THRESHOLD = 0.001
 ALLOW_UNSAFE_LOAD = True
 
