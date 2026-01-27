@@ -601,20 +601,27 @@ def _call_rfdetr_predict(model, image_np: np.ndarray):
     return predict(image_np, **kwargs)
 
 
-def _normalize_rfdetr_output(output, pred_label_offset: int):
-    if isinstance(output, list):
+def _select_output_field(output, names):
+    if isinstance(output, (list, tuple)):
         output = output[0] if output else {}
 
     if isinstance(output, dict):
-        boxes = output.get("boxes") or output.get("xyxy")
-        scores = output.get("scores") or output.get("confidence")
-        labels = output.get("labels") or output.get("class_id") or output.get("class_ids")
-    else:
-        boxes = getattr(output, "boxes", None) or getattr(output, "xyxy", None)
-        scores = getattr(output, "scores", None) or getattr(output, "confidence", None)
-        labels = getattr(output, "labels", None) or getattr(output, "class_id", None) or getattr(
-            output, "class_ids", None
-        )
+        for name in names:
+            if name in output and output[name] is not None:
+                return output[name]
+        return None
+
+    for name in names:
+        value = getattr(output, name, None)
+        if value is not None:
+            return value
+    return None
+
+
+def _normalize_rfdetr_output(output, pred_label_offset: int):
+    boxes = _select_output_field(output, ["boxes", "xyxy"])
+    scores = _select_output_field(output, ["scores", "confidence"])
+    labels = _select_output_field(output, ["labels", "class_id", "class_ids"])
 
     if boxes is None or scores is None or labels is None:
         raise ValueError("Unable to parse RF-DETR predictions. Inspect model.predict output.")
