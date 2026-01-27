@@ -8,14 +8,43 @@ Swapping standard RoIHeads with SDGRoIHeads...
 RoIHeads Swap Successful.
 Loading pretrain weights
 Traceback (most recent call last):
-  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 525, in <module>
+  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 582, in <module>
     main()
-  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 455, in main
+  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 512, in main
     built_models[spec["name"]] = build_rfdetr_model(
-  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 274, in build_rfdetr_model
-    missing, unexpected = _load_rfdetr_state_dict(model, state_dict)
-  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 325, in _load_rfdetr_state_dict
-    raise AttributeError(
-AttributeError: RF-DETR model has no load_state_dict. Check the RF-DETR version or provide a compatible checkpoint.
+  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 286, in build_rfdetr_model
+    model, missing, unexpected = _load_rfdetr_state_dict(model, state_dict, checkpoint_path)
+  File "C:\Users\a0110610\distillation-lab\run_custom_benchmark.py", line 355, in _load_rfdetr_state_dict
+    missing, unexpected = target.load_state_dict(state_dict, strict=False)
+  File "C:\Users\a0110610\distillation-lab\clean-env\lib\site-packages\torch\nn\modules\module.py", line 2593, in load_state_dict
+    raise RuntimeError(
+RuntimeError: Error(s) in loading state_dict for LWDETR:
+        size mismatch for transformer.enc_out_class_embed.0.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for transformer.enc_out_class_embed.0.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+        size mismatch for transformer.enc_out_class_embed.1.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for transformer.enc_out_class_embed.1.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+        size mismatch for transformer.enc_out_class_embed.2.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for transformer.enc_out_class_embed.2.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+        size mismatch for transformer.enc_out_class_embed.3.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for transformer.enc_out_class_embed.3.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+        size mismatch for transformer.enc_out_class_embed.4.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for transformer.enc_out_class_embed.4.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+        size mismatch for transformer.enc_out_class_embed.5.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for transformer.enc_out_class_embed.5.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+        size mismatch for transformer.enc_out_class_embed.6.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for transformer.enc_out_class_embed.6.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+        size mismatch for transformer.enc_out_class_embed.7.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for transformer.enc_out_class_embed.7.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+        size mismatch for transformer.enc_out_class_embed.8.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for transformer.enc_out_class_embed.8.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+        size mismatch for transformer.enc_out_class_embed.9.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for transformer.enc_out_class_embed.9.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+        size mismatch for transformer.enc_out_class_embed.10.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for transformer.enc_out_class_embed.10.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+        size mismatch for transformer.enc_out_class_embed.11.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for transformer.enc_out_class_embed.11.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+        size mismatch for transformer.enc_out_class_embed.12.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for transformer.enc_out_class_embed.12.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
+        size mismatch for class_embed.weight: copying a param with shape torch.Size([3, 256]) from checkpoint, the shape in current model is torch.Size([91, 256]).
+        size mismatch for class_embed.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([91]).
 (clean-env) PS C:\Users\a0110610\distillation-lab>
-
