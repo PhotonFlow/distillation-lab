@@ -279,10 +279,29 @@ def build_rfdetr_model(variant: str, num_classes: int, checkpoint_path: Path):
     except (TypeError, ValueError):
         pass
 
-    model = cls(**kwargs)
-    state_dict = _load_state_dict(checkpoint_path)
+    state = _torch_load_weights(checkpoint_path)
+    state_dict = _extract_state_dict(state)
     if not isinstance(state_dict, dict):
         raise RuntimeError(f"Unexpected checkpoint type for RF-DETR: {type(state_dict)}")
+
+    ckpt_head_classes = _infer_checkpoint_head_classes(state_dict)
+    candidate_num_classes = _resolve_rfdetr_num_classes(
+        dataset_classes=num_classes,
+        ckpt_head_classes=ckpt_head_classes,
+    )
+
+    model, used_num_classes = _instantiate_rfdetr(cls, candidate_num_classes)
+    model_head_classes = _infer_model_head_classes(model)
+
+    if ckpt_head_classes and model_head_classes and model_head_classes != ckpt_head_classes:
+        offset = 0
+        if used_num_classes is not None:
+            offset = model_head_classes - used_num_classes
+        alt_num_classes = max(1, ckpt_head_classes - offset) if offset else max(1, ckpt_head_classes - 1)
+        if alt_num_classes != used_num_classes:
+            model, used_num_classes = _instantiate_rfdetr(cls, alt_num_classes)
+            model_head_classes = _infer_model_head_classes(model)
+
     model, missing, unexpected = _load_rfdetr_state_dict(model, state_dict, checkpoint_path)
     if missing or unexpected:
         print(f"[RF-DETR] Missing keys: {missing}")
@@ -292,6 +311,74 @@ def build_rfdetr_model(variant: str, num_classes: int, checkpoint_path: Path):
     if hasattr(model, "eval"):
         model.eval()
     return model
+
+
+def _instantiate_rfdetr(cls, num_classes: int | None):
+    if num_classes is None:
+        return cls(), None
+
+    param_names = ["num_classes", "num_class", "num_labels", "n_classes"]
+    for name in param_names:
+        try:
+            return cls(**{name: num_classes}), num_classes
+        except TypeError:
+            continue
+    try:
+        return cls(num_classes=num_classes), num_classes
+    except TypeError:
+        return cls(), None
+
+
+def _infer_checkpoint_head_classes(state_dict: dict) -> int | None:
+    key_candidates = [
+        "class_embed.weight",
+        "class_embed.bias",
+    ]
+    for key in key_candidates:
+        if key in state_dict:
+            tensor = state_dict[key]
+            if hasattr(tensor, "shape") and tensor.shape:
+                return int(tensor.shape[0])
+
+    for key, tensor in state_dict.items():
+        if not hasattr(tensor, "shape") or not tensor.shape:
+            continue
+        if key.endswith("class_embed.weight"):
+            return int(tensor.shape[0])
+        if "enc_out_class_embed" in key and key.endswith(".weight"):
+            return int(tensor.shape[0])
+    return None
+
+
+def _infer_model_head_classes(model) -> int | None:
+    try:
+        state_dict = model.state_dict()
+    except Exception:
+        return None
+    for key, tensor in state_dict.items():
+        if not hasattr(tensor, "shape") or not tensor.shape:
+            continue
+        if key.endswith("class_embed.weight"):
+            return int(tensor.shape[0])
+        if "enc_out_class_embed" in key and key.endswith(".weight"):
+            return int(tensor.shape[0])
+    return None
+
+
+def _resolve_rfdetr_num_classes(dataset_classes: int | None, ckpt_head_classes: int | None) -> int | None:
+    if ckpt_head_classes is None and dataset_classes is None:
+        return None
+    if ckpt_head_classes is None:
+        return dataset_classes
+    if dataset_classes is None:
+        return max(1, ckpt_head_classes - 1)
+    if ckpt_head_classes == dataset_classes:
+        return dataset_classes
+    if ckpt_head_classes == dataset_classes + 1:
+        return dataset_classes
+    if ckpt_head_classes == dataset_classes - 1:
+        return max(1, dataset_classes - 1)
+    return max(1, ckpt_head_classes - 1)
 
 
 def _load_rfdetr_state_dict(model, state_dict: dict, checkpoint_path: Path):
