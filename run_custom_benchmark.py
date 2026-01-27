@@ -212,18 +212,30 @@ def _torch_load_weights(checkpoint_path: Path):
     return torch.load(checkpoint_path, **load_kwargs)
 
 
+def _extract_state_dict(state) -> dict | None:
+    if isinstance(state, dict):
+        for key in ("ema", "model_ema", "model", "state_dict"):
+            if key in state:
+                candidate = state[key]
+                if isinstance(candidate, dict):
+                    return candidate
+                if hasattr(candidate, "state_dict"):
+                    return candidate.state_dict()
+    if hasattr(state, "state_dict"):
+        return state.state_dict()
+    if isinstance(state, dict):
+        return state
+    return None
+
+
 def _load_state_dict(checkpoint_path: Path) -> dict:
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
     state = _torch_load_weights(checkpoint_path)
-    if isinstance(state, dict):
-        if "model" in state and isinstance(state["model"], dict):
-            return state["model"]
-        if "state_dict" in state and isinstance(state["state_dict"], dict):
-            return state["state_dict"]
-    if hasattr(state, "state_dict"):
-        return state.state_dict()
-    return state
+    state_dict = _extract_state_dict(state)
+    if state_dict is None:
+        return state
+    return state_dict
 
 
 def build_sdg_model(num_classes: int, checkpoint_path: Path):
@@ -271,7 +283,7 @@ def build_rfdetr_model(variant: str, num_classes: int, checkpoint_path: Path):
     state_dict = _load_state_dict(checkpoint_path)
     if not isinstance(state_dict, dict):
         raise RuntimeError(f"Unexpected checkpoint type for RF-DETR: {type(state_dict)}")
-    missing, unexpected = _load_rfdetr_state_dict(model, state_dict)
+    model, missing, unexpected = _load_rfdetr_state_dict(model, state_dict, checkpoint_path)
     if missing or unexpected:
         print(f"[RF-DETR] Missing keys: {missing}")
         print(f"[RF-DETR] Unexpected keys: {unexpected}")
@@ -282,11 +294,11 @@ def build_rfdetr_model(variant: str, num_classes: int, checkpoint_path: Path):
     return model
 
 
-def _load_rfdetr_state_dict(model, state_dict: dict):
+def _load_rfdetr_state_dict(model, state_dict: dict, checkpoint_path: Path):
     def _try_load(target, label: str):
         missing, unexpected = target.load_state_dict(state_dict, strict=False)
         print(f"[RF-DETR] Loaded state_dict into {label}.")
-        return missing, unexpected
+        return target, missing, unexpected
 
     if hasattr(model, "load_state_dict"):
         try:
@@ -294,11 +306,26 @@ def _load_rfdetr_state_dict(model, state_dict: dict):
         except Exception:
             pass
 
+    # Try native loader methods if exposed by RF-DETR wrapper
+    for method_name in ("load", "load_weights", "load_checkpoint", "load_model"):
+        method = getattr(model, method_name, None)
+        if callable(method):
+            try:
+                result = method(str(checkpoint_path))
+                if result is not None and result is not model:
+                    print(f"[RF-DETR] Loaded via model.{method_name}() and returned a new model.")
+                    return result, [], []
+                print(f"[RF-DETR] Loaded via model.{method_name}().")
+                return model, [], []
+            except Exception:
+                pass
+
     for attr in ("model", "detector", "net", "module"):
         inner = getattr(model, attr, None)
         if inner is not None and hasattr(inner, "load_state_dict"):
             try:
-                return _try_load(inner, f"model.{attr}")
+                loaded, missing, unexpected = _try_load(inner, f"model.{attr}")
+                return model, missing, unexpected
             except Exception:
                 pass
 
@@ -318,14 +345,44 @@ def _load_rfdetr_state_dict(model, state_dict: dict):
             try:
                 missing, unexpected = inner.load_state_dict(stripped, strict=False)
                 print(f"[RF-DETR] Loaded stripped state_dict into model.{attr}.")
-                return missing, unexpected
+                return model, missing, unexpected
             except Exception:
                 continue
+
+    # Fallback: search for any loadable torch module attached to the wrapper
+    target = _find_loadable_module(model)
+    if target is not None:
+        missing, unexpected = target.load_state_dict(state_dict, strict=False)
+        print("[RF-DETR] Loaded state_dict into discovered module.")
+        return model, missing, unexpected
 
     raise AttributeError(
         "RF-DETR model has no load_state_dict. "
         "Check the RF-DETR version or provide a compatible checkpoint."
     )
+
+
+def _find_loadable_module(obj, max_depth: int = 2):
+    import torch.nn as nn
+
+    seen = set()
+    queue = [(obj, 0)]
+    while queue:
+        current, depth = queue.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, nn.Module) and hasattr(current, "load_state_dict"):
+            return current
+        if depth >= max_depth:
+            continue
+        if not hasattr(current, "__dict__"):
+            continue
+        for name, value in vars(current).items():
+            if name.startswith("__"):
+                continue
+            queue.append((value, depth + 1))
+    return None
 
 
 def _tensor_to_numpy_image(image_tensor: torch.Tensor) -> np.ndarray:
