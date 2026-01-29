@@ -26,6 +26,7 @@ SDG_CHECKPOINT = Path("./checkpoints_KIONA/unbiased_frcnn_best_KIONA.pth")
 
 RFDETR_VARIANT = "base"  # "base", "small", "medium"
 RFDETR_CHECKPOINT = Path("checkpoints_KIONA_comp/custom_training/rfdetr/checkpoint_best_total.pth")
+RFDETR_ADV_CHECKPOINT = Path("checkpoints_KIONA_comp/custom_training/rfdetr_adv/checkpoint_best_total.pth")
 RFDETR_SCORE_THRESHOLD = 0.001
 ALLOW_UNSAFE_LOAD = True
 
@@ -43,6 +44,16 @@ MODEL_SPECS = [
         "name": f"RF-DETR ({RFDETR_VARIANT}) (train_custom_models)",
         "type": "rfdetr",
         "checkpoint": RFDETR_CHECKPOINT,
+        "variant": RFDETR_VARIANT,
+        "label_offset": 0,
+        "pred_label_offset": 0,
+        "resize_to": None,
+        "batch_size": 1,
+    },
+    {
+        "name": f"RF-DETR ({RFDETR_VARIANT}) + PGD-3 (train_custom_models)",
+        "type": "rfdetr",
+        "checkpoint": RFDETR_ADV_CHECKPOINT,
         "variant": RFDETR_VARIANT,
         "label_offset": 0,
         "pred_label_offset": 0,
