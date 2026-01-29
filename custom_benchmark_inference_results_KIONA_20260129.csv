@@ -1,0 +1,31 @@
+Model,Subset,Severity,Condition,mAP_50,mAP_50_95,Recall
+SDG Faster R-CNN (train_benchmark),subset_1_severity_1,1,clean,0.9642933011054993,0.7962971329689026,0.8328660130500793
+RF-DETR (base) (train_custom_models),subset_1_severity_1,1,clean,0.9763444066047668,0.8184154033660889,0.8509563207626343
+RF-DETR (base) + PGD-3 (train_custom_models),subset_1_severity_1,1,clean,0.9829668998718262,0.8409531116485596,0.8711943626403809
+SDG Faster R-CNN (train_benchmark),subset_1_severity_1,1,ood,0.8851181268692017,0.5881211757659912,0.6504470705986023
+RF-DETR (base) (train_custom_models),subset_1_severity_1,1,ood,0.9705797433853149,0.7453755140304565,0.7833633422851562
+RF-DETR (base) + PGD-3 (train_custom_models),subset_1_severity_1,1,ood,0.9636476039886475,0.7662439942359924,0.8050938844680786
+SDG Faster R-CNN (train_benchmark),subset_2_severity_2,2,clean,0.9678564071655273,0.7929439544677734,0.8298847675323486
+RF-DETR (base) (train_custom_models),subset_2_severity_2,2,clean,0.977103590965271,0.8190574049949646,0.8467105031013489
+RF-DETR (base) + PGD-3 (train_custom_models),subset_2_severity_2,2,clean,0.9819527268409729,0.8350579142570496,0.8642415404319763
+SDG Faster R-CNN (train_benchmark),subset_2_severity_2,2,ood,0.7942669987678528,0.48656076192855835,0.5713784098625183
+RF-DETR (base) (train_custom_models),subset_2_severity_2,2,ood,0.9384658336639404,0.6789813041687012,0.7220649719238281
+RF-DETR (base) + PGD-3 (train_custom_models),subset_2_severity_2,2,ood,0.915693461894989,0.6927454471588135,0.7362791299819946
+SDG Faster R-CNN (train_benchmark),subset_3_severity_3,3,clean,0.9671612977981567,0.7918442487716675,0.8305691480636597
+RF-DETR (base) (train_custom_models),subset_3_severity_3,3,clean,0.9813063144683838,0.8169837594032288,0.8473621606826782
+RF-DETR (base) + PGD-3 (train_custom_models),subset_3_severity_3,3,clean,0.9829905033111572,0.8391742706298828,0.8696877360343933
+SDG Faster R-CNN (train_benchmark),subset_3_severity_3,3,ood,0.6981759667396545,0.40189501643180847,0.49248209595680237
+RF-DETR (base) (train_custom_models),subset_3_severity_3,3,ood,0.8915315270423889,0.6121584177017212,0.6652799844741821
+RF-DETR (base) + PGD-3 (train_custom_models),subset_3_severity_3,3,ood,0.8211493492126465,0.5816522836685181,0.6334918737411499
+SDG Faster R-CNN (train_benchmark),subset_4_severity_4,4,clean,0.974741518497467,0.806090235710144,0.84238201379776
+RF-DETR (base) (train_custom_models),subset_4_severity_4,4,clean,0.9766989350318909,0.8253957629203796,0.8570478558540344
+RF-DETR (base) + PGD-3 (train_custom_models),subset_4_severity_4,4,clean,0.9821056723594666,0.8457483649253845,0.8747679591178894
+SDG Faster R-CNN (train_benchmark),subset_4_severity_4,4,ood,0.6251009702682495,0.34625527262687683,0.4460073411464691
+RF-DETR (base) (train_custom_models),subset_4_severity_4,4,ood,0.8011912703514099,0.5260228514671326,0.5847821831703186
+RF-DETR (base) + PGD-3 (train_custom_models),subset_4_severity_4,4,ood,0.8028765916824341,0.5476607084274292,0.6097350716590881
+SDG Faster R-CNN (train_benchmark),subset_5_severity_5,5,clean,0.9737547636032104,0.8089485168457031,0.8453207015991211
+RF-DETR (base) (train_custom_models),subset_5_severity_5,5,clean,0.9817560315132141,0.8282058238983154,0.8601685762405396
+RF-DETR (base) + PGD-3 (train_custom_models),subset_5_severity_5,5,clean,0.9825713038444519,0.8503177165985107,0.8807810544967651
+SDG Faster R-CNN (train_benchmark),subset_5_severity_5,5,ood,0.5263781547546387,0.27891239523887634,0.3681100308895111
+RF-DETR (base) (train_custom_models),subset_5_severity_5,5,ood,0.6623148322105408,0.4134635329246521,0.4739249348640442
+RF-DETR (base) + PGD-3 (train_custom_models),subset_5_severity_5,5,ood,0.6998432874679565,0.4584210515022278,0.5221900343894958
